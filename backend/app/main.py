@@ -23,6 +23,13 @@ from app.websocket import manager
 
 app = FastAPI(title="Themis API")
 
+
+@app.on_event("startup")
+async def startup_event():
+    """Ensure database tables exist on startup."""
+    Base.metadata.create_all(bind=engine)
+
+
 # CORS configuration
 allowed_origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")]
 app.add_middleware(
