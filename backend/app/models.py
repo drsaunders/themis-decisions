@@ -2,13 +2,13 @@
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, Boolean, ForeignKey, DateTime, Index
 from sqlalchemy.orm import relationship
-from ulid import new as new_ulid
+from ulid import ULID
 from app.database import Base
 
 
 def generate_ulid():
     """Generate a new ULID string."""
-    return str(new_ulid())
+    return str(ULID())
 
 
 class User(Base):
