@@ -35,13 +35,23 @@ export default function NameScreen() {
     }}>
       <div style={{ 
         background: 'white', 
-        padding: '40px', 
-        borderRadius: '8px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        padding: '48px', 
+        borderRadius: '16px',
+        boxShadow: '0 8px 24px rgba(255, 193, 7, 0.2)',
+        border: '3px solid #FFD700',
         maxWidth: '400px',
         width: '100%'
       }}>
-        <h1 style={{ marginBottom: '24px', textAlign: 'center' }}>Themis</h1>
+        <h1 style={{ 
+          marginBottom: '32px', 
+          textAlign: 'center',
+          fontSize: '36px',
+          fontWeight: 'bold',
+          background: 'linear-gradient(135deg, #FFD700 0%, #FFC107 100%)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          backgroundClip: 'text',
+        }}>Themis</h1>
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '20px' }}>
             <label htmlFor="name" style={{ display: 'block', marginBottom: '8px' }}>

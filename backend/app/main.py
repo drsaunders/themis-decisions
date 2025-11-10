@@ -62,7 +62,14 @@ async def list_polls(db: Session = Depends(get_db)):
     """List all polls."""
     polls = db.query(Poll).order_by(Poll.created_at.desc()).all()
     return [
-        PollResponse(pollId=poll.id, title=poll.title, created_at=poll.created_at.isoformat())
+        PollResponse(
+            pollId=poll.id,
+            title=poll.title,
+            created_at=poll.created_at.isoformat(),
+            winner_id=poll.winner_id,
+            creator_id=poll.creator_id,
+            princess_mode=poll.princess_mode
+        )
         for poll in polls
     ]
 
@@ -70,11 +77,29 @@ async def list_polls(db: Session = Depends(get_db)):
 @app.post("/polls", response_model=PollResponse)
 async def create_poll(poll_data: PollCreate, db: Session = Depends(get_db)):
     """Create a new poll."""
-    poll = Poll(title=poll_data.title)
+    # Validate creator_id if provided
+    creator_id = poll_data.creator_id
+    if creator_id:
+        user = db.query(User).filter(User.id == creator_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Creator user not found")
+    
+    poll = Poll(
+        title=poll_data.title,
+        creator_id=creator_id,
+        princess_mode=poll_data.princess_mode
+    )
     db.add(poll)
     db.commit()
     db.refresh(poll)
-    return PollResponse(pollId=poll.id, title=poll.title, created_at=poll.created_at.isoformat())
+    return PollResponse(
+        pollId=poll.id,
+        title=poll.title,
+        created_at=poll.created_at.isoformat(),
+        winner_id=poll.winner_id,
+        creator_id=poll.creator_id,
+        princess_mode=poll.princess_mode
+    )
 
 
 @app.post("/polls/{poll_id}/join", response_model=JoinPollResponse)
@@ -155,6 +180,10 @@ async def submit_vote(poll_id: str, vote_data: VoteRequest, db: Session = Depend
     ).first()
     if not participant:
         raise HTTPException(status_code=403, detail="User not a participant")
+    
+    # Check princess mode: only creator can rate
+    if poll.princess_mode and poll.creator_id != vote_data.userId:
+        raise HTTPException(status_code=403, detail="Only the poll creator can rate in princess mode")
     
     # Validate ratings
     for entry in vote_data.entries:
@@ -267,10 +296,13 @@ async def get_status(poll_id: str, db: Session = Depends(get_db)):
             winner = OptionResponse(id=winner_option.id, label=winner_option.label)
     
     return StatusResponse(
+        title=poll.title,
         readyCount=ready_count,
         totalParticipants=total_participants,
         optionCount=option_count,
-        winner=winner
+        winner=winner,
+        creator_id=poll.creator_id,
+        princess_mode=poll.princess_mode
     )
 
 

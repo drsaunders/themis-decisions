@@ -10,6 +10,9 @@ export interface Poll {
   pollId: string
   title: string
   created_at: string
+  winner_id?: string | null
+  creator_id?: string | null
+  princess_mode?: boolean
 }
 
 export interface Option {
@@ -39,11 +42,11 @@ export async function listPolls(): Promise<Poll[]> {
   return response.json()
 }
 
-export async function createPoll(title: string): Promise<Poll> {
+export async function createPoll(title: string, creatorId: string, princessMode: boolean = false): Promise<Poll> {
   const response = await fetch(`${API_URL}/polls`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, creator_id: creatorId, princess_mode: princessMode }),
   })
   if (!response.ok) throw new Error('Failed to create poll')
   return response.json()
@@ -95,10 +98,13 @@ export async function markReady(pollId: string, userId: string): Promise<{ ready
 }
 
 export async function getStatus(pollId: string): Promise<{
+  title: string
   readyCount: number
   totalParticipants: number
   optionCount: number
   winner: Option | null
+  creator_id?: string | null
+  princess_mode?: boolean
 }> {
   const response = await fetch(`${API_URL}/polls/${pollId}/status`)
   if (!response.ok) throw new Error('Failed to get status')

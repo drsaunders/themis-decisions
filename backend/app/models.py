@@ -26,6 +26,8 @@ class Poll(Base):
     title = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     winner_id = Column(String, nullable=True)  # Set after reveal
+    creator_id = Column(String, ForeignKey("users.id"), nullable=True)  # Poll creator
+    princess_mode = Column(Boolean, default=False, nullable=False)  # Only creator can rate
 
     # Relationships
     participants = relationship("Participant", back_populates="poll", cascade="all, delete-orphan")

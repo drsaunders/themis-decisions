@@ -46,6 +46,16 @@ alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
+To run a local database:
+```
+docker run --name themis-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=themis -p 5432:5432 -d postgres:14
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/themis"
+cd backend
+mkdir alembic/versions
+./generate_migration.sh
+alembic upgrade head
+```   
+
 ### Frontend
 
 ```bash

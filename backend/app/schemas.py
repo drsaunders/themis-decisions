@@ -17,12 +17,17 @@ class UserResponse(BaseModel):
 
 class PollCreate(BaseModel):
     title: str
+    creator_id: Optional[str] = None
+    princess_mode: bool = False
 
 
 class PollResponse(BaseModel):
     pollId: str
     title: str
     created_at: str
+    winner_id: Optional[str] = None
+    creator_id: Optional[str] = None
+    princess_mode: bool = False
 
     class Config:
         from_attributes = True
@@ -73,10 +78,13 @@ class ReadyResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
+    title: str
     readyCount: int
     totalParticipants: int
     optionCount: int
     winner: Optional[OptionResponse] = None
+    creator_id: Optional[str] = None
+    princess_mode: bool = False
 
 
 class RevealResponse(BaseModel):
