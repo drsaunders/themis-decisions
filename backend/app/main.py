@@ -24,7 +24,7 @@ from app.websocket import manager
 app = FastAPI(title="Themis API")
 
 # CORS configuration
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+allowed_origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
