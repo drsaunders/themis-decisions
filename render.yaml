@@ -11,8 +11,8 @@ services:
     name: themis-backend
     env: python
     plan: free
-    buildCommand: pip install -U pip && pip install .
-    startCommand: (alembic current 2>&1 | grep -q "5d03a847b91d" || alembic stamp 5d03a847b91d) && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: cd backend && pip install -U pip && pip install .
+    startCommand: set -e && cd backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
