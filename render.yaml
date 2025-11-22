@@ -12,7 +12,7 @@ services:
     env: python
     plan: free
     buildCommand: cd backend && pip install -U pip && pip install .
-    startCommand: alembic current && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: (alembic current >/dev/null 2>&1 || alembic stamp head) && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
