@@ -119,6 +119,23 @@ export async function revealWinner(pollId: string): Promise<{ winner: Option }> 
   return response.json()
 }
 
+export async function deletePoll(pollId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/polls/${pollId}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) throw new Error('Failed to delete poll')
+}
+
+export async function clonePoll(pollId: string, creatorId: string): Promise<Poll> {
+  const response = await fetch(`${API_URL}/polls/${pollId}/clone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creator_id: creatorId }),
+  })
+  if (!response.ok) throw new Error('Failed to clone poll')
+  return response.json()
+}
+
 export function createWebSocket(pollId: string): WebSocket {
   // Handle both full URLs and protocol-relative URLs
   let wsBase = WS_URL
@@ -133,5 +150,21 @@ export function createWebSocket(pollId: string): WebSocket {
       : `wss://${wsBase}`
   }
   return new WebSocket(`${wsBase}/ws/polls/${pollId}`)
+}
+
+export function createHomeWebSocket(): WebSocket {
+  // Handle both full URLs and protocol-relative URLs
+  let wsBase = WS_URL
+  if (wsBase.startsWith('http://')) {
+    wsBase = wsBase.replace('http://', 'ws://')
+  } else if (wsBase.startsWith('https://')) {
+    wsBase = wsBase.replace('https://', 'wss://')
+  } else if (!wsBase.startsWith('ws://') && !wsBase.startsWith('wss://')) {
+    // If no protocol, assume ws for localhost, wss for others
+    wsBase = (wsBase.includes('localhost') || wsBase.includes('127.0.0.1')) 
+      ? `ws://${wsBase}` 
+      : `wss://${wsBase}`
+  }
+  return new WebSocket(`${wsBase}/ws/home`)
 }
 

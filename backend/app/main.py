@@ -17,9 +17,10 @@ from app.schemas import (
     VoteRequest, VoteResponse,
     ReadyRequest, ReadyResponse,
     StatusResponse, RevealResponse,
+    ClonePollRequest,
 )
 from app.scoring import compute_winner
-from app.websocket import manager
+from app.websocket import manager, global_manager
 
 app = FastAPI(title="Themis API")
 
@@ -85,6 +86,16 @@ async def create_poll(poll_data: PollCreate, db: Session = Depends(get_db)):
     db.add(poll)
     db.commit()
     db.refresh(poll)
+    
+    # Broadcast poll created event to all home screen connections
+    await global_manager.send_poll_created(
+        poll_id=poll.id,
+        title=poll.title,
+        created_at=poll.created_at.isoformat(),
+        creator_id=poll.creator_id,
+        princess_mode=poll.princess_mode
+    )
+    
     return PollResponse(
         pollId=poll.id,
         title=poll.title,
@@ -149,11 +160,29 @@ async def create_option(poll_id: str, option_data: OptionCreate, db: Session = D
     
     option = Option(poll_id=poll_id, label=option_data.label)
     db.add(option)
+    
+    # Reset all participants' ready status when option is added
+    db.query(Participant).filter(
+        Participant.poll_id == poll_id
+    ).update({Participant.ready: False})
+    
     db.commit()
     db.refresh(option)
     
     # Broadcast option added
     await manager.send_option_added(poll_id, option.id, option.label)
+    
+    # Get updated ready counts and broadcast
+    ready_count = db.query(func.count(Participant.id)).filter(
+        Participant.poll_id == poll_id,
+        Participant.ready == True
+    ).scalar()
+    
+    total_participants = db.query(func.count(Participant.id)).filter(
+        Participant.poll_id == poll_id
+    ).scalar()
+    
+    await manager.send_ready_counts(poll_id, ready_count, total_participants)
     
     return OptionResponse(id=option.id, label=option.label)
 
@@ -215,7 +244,22 @@ async def submit_vote(poll_id: str, vote_data: VoteRequest, db: Session = Depend
             )
             db.add(vote)
     
+    # Reset only this participant's ready status when votes change
+    participant.ready = False
+    
     db.commit()
+    
+    # Get updated ready counts and broadcast
+    ready_count = db.query(func.count(Participant.id)).filter(
+        Participant.poll_id == poll_id,
+        Participant.ready == True
+    ).scalar()
+    
+    total_participants = db.query(func.count(Participant.id)).filter(
+        Participant.poll_id == poll_id
+    ).scalar()
+    
+    await manager.send_ready_counts(poll_id, ready_count, total_participants)
     
     return VoteResponse(ok=True)
 
@@ -337,6 +381,94 @@ async def reveal_winner(poll_id: str, db: Session = Depends(get_db)):
     await manager.send_reveal(poll_id, winner_option.id, winner_option.label)
     
     return RevealResponse(winner=OptionResponse(id=winner_option.id, label=winner_option.label))
+
+
+@app.delete("/polls/{poll_id}")
+async def delete_poll(poll_id: str, db: Session = Depends(get_db)):
+    """Delete a poll."""
+    poll = db.query(Poll).filter(Poll.id == poll_id).first()
+    if not poll:
+        raise HTTPException(status_code=404, detail="Poll not found")
+    
+    # Delete poll (cascade will handle related data)
+    db.delete(poll)
+    db.commit()
+    
+    # Broadcast poll deleted event
+    await global_manager.send_poll_deleted(poll_id)
+    
+    return {"ok": True}
+
+
+@app.post("/polls/{poll_id}/clone", response_model=PollResponse)
+async def clone_poll(poll_id: str, request: ClonePollRequest, db: Session = Depends(get_db)):
+    """Clone a poll with its options."""
+    # Get original poll
+    original_poll = db.query(Poll).filter(Poll.id == poll_id).first()
+    if not original_poll:
+        raise HTTPException(status_code=404, detail="Poll not found")
+    
+    # Validate creator_id if provided
+    creator_id = request.creator_id
+    if creator_id:
+        user = db.query(User).filter(User.id == creator_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Creator user not found")
+    
+    # Create new poll
+    new_poll = Poll(
+        title=original_poll.title,
+        creator_id=creator_id,
+        princess_mode=original_poll.princess_mode
+    )
+    db.add(new_poll)
+    db.flush()  # Flush to get the new poll ID
+    
+    # Clone options
+    original_options = db.query(Option).filter(Option.poll_id == poll_id).order_by(Option.created_at).all()
+    for original_option in original_options:
+        new_option = Option(
+            poll_id=new_poll.id,
+            label=original_option.label
+        )
+        db.add(new_option)
+    
+    db.commit()
+    db.refresh(new_poll)
+    
+    # Broadcast poll cloned event
+    await global_manager.send_poll_cloned(
+        poll_id=new_poll.id,
+        title=new_poll.title,
+        created_at=new_poll.created_at.isoformat(),
+        creator_id=new_poll.creator_id,
+        princess_mode=new_poll.princess_mode
+    )
+    
+    return PollResponse(
+        pollId=new_poll.id,
+        title=new_poll.title,
+        created_at=new_poll.created_at.isoformat(),
+        winner_id=new_poll.winner_id,
+        creator_id=new_poll.creator_id,
+        princess_mode=new_poll.princess_mode
+    )
+
+
+@app.websocket("/ws/home")
+async def websocket_home(websocket: WebSocket):
+    """WebSocket endpoint for home screen real-time updates."""
+    await global_manager.connect(websocket)
+    
+    try:
+        while True:
+            # Keep connection alive, wait for disconnect
+            # Any messages from client are ignored (connection is broadcast-only)
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        global_manager.disconnect(websocket)
 
 
 @app.websocket("/ws/polls/{poll_id}")

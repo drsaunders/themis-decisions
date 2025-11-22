@@ -90,3 +90,7 @@ class StatusResponse(BaseModel):
 class RevealResponse(BaseModel):
     winner: OptionResponse
 
+
+class ClonePollRequest(BaseModel):
+    creator_id: Optional[str] = None
+

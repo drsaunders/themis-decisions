@@ -29,6 +29,7 @@ export default function PollScreen() {
   const [saving, setSaving] = useState(false)
   const [newOptionLabel, setNewOptionLabel] = useState('')
   const [ready, setReady] = useState(false)
+  const previousReadyCountRef = useRef<number>(0)
 
   const wsRef = useRef<WebSocket | null>(null)
   const saveTimeoutRef = useRef<number | null>(null)
@@ -50,6 +51,7 @@ export default function PollScreen() {
         setOptions(opts)
         setPollTitle(status.title)
         setReadyCount(status.readyCount)
+        previousReadyCountRef.current = status.readyCount
         setTotalParticipants(status.totalParticipants)
         setCreatorId(status.creator_id || null)
         setPrincessMode(status.princess_mode || false)
@@ -94,10 +96,18 @@ export default function PollScreen() {
           }
           return [...prev, message.option]
         })
+        setReady(false) // Reset ready status when option is added
         break
       case 'ready_counts':
-        setReadyCount(message.ready)
+        const newReadyCount = message.ready
+        const previousReadyCount = previousReadyCountRef.current
+        setReadyCount(newReadyCount)
         setTotalParticipants(message.participants)
+        // If ready count decreased and we were ready, we're no longer ready
+        if (ready && newReadyCount < previousReadyCount) {
+          setReady(false)
+        }
+        previousReadyCountRef.current = newReadyCount
         break
       case 'reveal':
         navigate(`/poll/${pollId}/result`)
@@ -141,14 +151,16 @@ export default function PollScreen() {
       ...prev,
       [optionId]: { ...prev[optionId], rating, veto: false },
     }))
+    setReady(false) // Reset ready status when rating changes
     debouncedSaveVotes()
   }
 
   const handleVetoChange = (optionId: string, veto: boolean) => {
     setVotes((prev) => ({
       ...prev,
-      [optionId]: { ...prev[optionId], veto, rating: veto ? null : prev[optionId]?.rating || 5 },
+      [optionId]: { ...prev[optionId], veto, rating: veto ? null : prev[optionId]?.rating ?? 5 },
     }))
+    setReady(false) // Reset ready status when veto changes
     debouncedSaveVotes()
   }
 
@@ -160,6 +172,7 @@ export default function PollScreen() {
       await createOption(pollId, newOptionLabel.trim())
       // Don't add optimistically - let WebSocket message handle it
       setNewOptionLabel('')
+      setReady(false) // Reset ready status when option is added
     } catch (error) {
       alert('Failed to add option')
     }
@@ -169,8 +182,9 @@ export default function PollScreen() {
     if (!pollId || !user) return
 
     try {
-      await markReady(pollId, user.userId)
+      const response = await markReady(pollId, user.userId)
       setReady(true)
+      previousReadyCountRef.current = response.readyCount
     } catch (error) {
       alert('Failed to mark ready')
     }
@@ -261,7 +275,7 @@ export default function PollScreen() {
                       <div style={{ flex: 1, padding: '8px 0', display: 'flex', alignItems: 'center' }}>
                       <input
                         type="range"
-                        min="1"
+                        min="0"
                         max="10"
                         value={votes[option.id]?.rating ?? 5}
                         onChange={(e) => handleRatingChange(option.id, parseInt(e.target.value))}

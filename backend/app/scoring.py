@@ -11,8 +11,8 @@ def compute_winner(poll_id: str, db: Session) -> Optional[str]:
     Compute winner using harmonic mean scoring.
     
     For each option:
-    1. Collect all non-veto ratings
-    2. Exclude users who vetoed that option
+    1. If ANY user vetoed the option, exclude it entirely
+    2. Collect all non-None ratings
     3. If no ratings remain, option is excluded
     4. Score = harmonic mean
     
@@ -45,16 +45,22 @@ def compute_winner(poll_id: str, db: Session) -> Optional[str]:
     for option in options:
         votes_for_option = option_votes.get(option.id, [])
         
-        # Filter: exclude users who vetoed, and only include non-None ratings
+        # Check if ANY user vetoed this option - if so, exclude it entirely
+        # A vetoed option can NEVER be the winner, regardless of other ratings
+        # Query directly from database to ensure we have the latest veto status
+        vetoed_votes = db.query(Vote).filter(
+            Vote.poll_id == poll_id,
+            Vote.option_id == option.id,
+            Vote.veto == True
+        ).first()
+        
+        if vetoed_votes is not None:
+            continue  # Vetoed options are never winners
+        
+        # Filter: only include non-None ratings
         valid_ratings = []
-        vetoed_users = set()
-        
         for user_id, rating, veto in votes_for_option:
-            if veto:
-                vetoed_users.add(user_id)
-        
-        for user_id, rating, veto in votes_for_option:
-            if user_id not in vetoed_users and rating is not None:
+            if rating is not None:
                 valid_ratings.append(rating)
         
         if not valid_ratings:

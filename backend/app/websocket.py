@@ -94,5 +94,71 @@ class ConnectionManager:
             pass
 
 
+class GlobalConnectionManager:
+    """Manages global WebSocket connections (e.g., for home screen)."""
+    
+    def __init__(self):
+        # Set of WebSocket connections for global updates
+        self.active_connections: Set[WebSocket] = set()
+    
+    async def connect(self, websocket: WebSocket):
+        """Connect a client for global updates."""
+        await websocket.accept()
+        self.active_connections.add(websocket)
+    
+    def disconnect(self, websocket: WebSocket):
+        """Disconnect a client from global updates."""
+        self.active_connections.discard(websocket)
+    
+    async def broadcast(self, message: dict):
+        """Broadcast a message to all connected clients."""
+        disconnected = set()
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                disconnected.add(connection)
+        
+        # Clean up disconnected clients
+        for connection in disconnected:
+            self.active_connections.discard(connection)
+    
+    async def send_poll_created(self, poll_id: str, title: str, created_at: str, creator_id: str = None, princess_mode: bool = False):
+        """Broadcast poll created event."""
+        await self.broadcast({
+            "type": "poll_created",
+            "poll": {
+                "pollId": poll_id,
+                "title": title,
+                "created_at": created_at,
+                "winner_id": None,
+                "creator_id": creator_id,
+                "princess_mode": princess_mode,
+            },
+        })
+    
+    async def send_poll_deleted(self, poll_id: str):
+        """Broadcast poll deleted event."""
+        await self.broadcast({
+            "type": "poll_deleted",
+            "pollId": poll_id,
+        })
+    
+    async def send_poll_cloned(self, poll_id: str, title: str, created_at: str, creator_id: str = None, princess_mode: bool = False):
+        """Broadcast poll cloned event."""
+        await self.broadcast({
+            "type": "poll_cloned",
+            "poll": {
+                "pollId": poll_id,
+                "title": title,
+                "created_at": created_at,
+                "winner_id": None,
+                "creator_id": creator_id,
+                "princess_mode": princess_mode,
+            },
+        })
+
+
 manager = ConnectionManager()
+global_manager = GlobalConnectionManager()
 

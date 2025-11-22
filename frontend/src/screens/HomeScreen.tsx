@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
-import { listPolls, createPoll, Poll } from '../api'
+import { listPolls, createPoll, deletePoll, clonePoll, Poll, createHomeWebSocket } from '../api'
 
 export default function HomeScreen() {
   const user = useStore((state) => state.user)
@@ -12,9 +12,50 @@ export default function HomeScreen() {
   const [newPollTitle, setNewPollTitle] = useState('')
   const [princessMode, setPrincessMode] = useState(false)
   const navigate = useNavigate()
+  const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
     loadPolls()
+
+    // Connect to WebSocket for real-time updates
+    const ws = createHomeWebSocket()
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data)
+      if (message.type === 'poll_created') {
+        // Add new poll to the list if it doesn't already exist
+        setPolls((prevPolls) => {
+          // Check if poll already exists to prevent duplicates
+          if (prevPolls.some(p => p.pollId === message.poll.pollId)) {
+            return prevPolls
+          }
+          // Add new poll at the beginning (most recent first)
+          return [message.poll, ...prevPolls]
+        })
+      } else if (message.type === 'poll_deleted') {
+        // Remove deleted poll from the list
+        setPolls((prevPolls) => prevPolls.filter(p => p.pollId !== message.pollId))
+      } else if (message.type === 'poll_cloned') {
+        // Add cloned poll to the list if it doesn't already exist
+        setPolls((prevPolls) => {
+          // Check if poll already exists to prevent duplicates
+          if (prevPolls.some(p => p.pollId === message.poll.pollId)) {
+            return prevPolls
+          }
+          // Add new poll at the beginning (most recent first)
+          return [message.poll, ...prevPolls]
+        })
+      }
+    }
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error)
+    }
+    wsRef.current = ws
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
   }, [])
 
   const loadPolls = async () => {
@@ -47,6 +88,30 @@ export default function HomeScreen() {
       alert('Failed to create poll')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleDeletePoll = async (pollId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('Are you sure you want to delete this poll? This action cannot be undone.')) {
+      return
+    }
+    try {
+      await deletePoll(pollId)
+      // Poll will be removed via WebSocket update
+    } catch (error) {
+      alert('Failed to delete poll')
+    }
+  }
+
+  const handleClonePoll = async (pollId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!user) return
+    try {
+      await clonePoll(pollId, user.userId)
+      // Poll will be added via WebSocket update
+    } catch (error) {
+      alert('Failed to clone poll')
     }
   }
 
@@ -199,9 +264,59 @@ export default function HomeScreen() {
                           e.currentTarget.style.transform = 'translateY(0)'
                         }}
                       >
-                        <div style={{ fontWeight: 'bold', marginBottom: '6px', fontSize: '16px', color: '#1A1A1A' }}>{poll.title}</div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          {new Date(poll.created_at).toLocaleString()}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 'bold', marginBottom: '6px', fontSize: '16px', color: '#1A1A1A' }}>{poll.title}</div>
+                            <div style={{ fontSize: '12px', color: '#666' }}>
+                              {new Date(poll.created_at).toLocaleString()}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', marginLeft: '12px' }}>
+                            <button
+                              onClick={(e) => handleClonePoll(poll.pollId, e)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                background: 'linear-gradient(135deg, #757575 0%, #616161 100%)',
+                                opacity: 1,
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = '0.9'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = '1'
+                              }}
+                            >
+                              Clone
+                            </button>
+                            <button
+                              onClick={(e) => handleDeletePoll(poll.pollId, e)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                background: 'linear-gradient(135deg, #757575 0%, #616161 100%)',
+                                opacity: 1,
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = '0.9'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = '1'
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -227,15 +342,62 @@ export default function HomeScreen() {
                           background: 'rgba(255, 255, 255, 0.5)',
                           padding: '18px',
                           borderRadius: '12px',
-                          cursor: 'not-allowed',
                           boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-                          opacity: 0.6,
                           border: '1px solid rgba(255, 193, 7, 0.2)',
+                          position: 'relative',
                         }}
                       >
-                        <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#666', fontSize: '16px' }}>{poll.title}</div>
-                        <div style={{ fontSize: '12px', color: '#999' }}>
-                          {new Date(poll.created_at).toLocaleString()}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1, opacity: 0.6 }}>
+                            <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#666', fontSize: '16px' }}>{poll.title}</div>
+                            <div style={{ fontSize: '12px', color: '#999' }}>
+                              {new Date(poll.created_at).toLocaleString()}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', marginLeft: '12px', position: 'relative', zIndex: 1 }}>
+                            <button
+                              onClick={(e) => handleClonePoll(poll.pollId, e)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                background: 'linear-gradient(135deg, #757575 0%, #616161 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = '0.9'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = '1'
+                              }}
+                            >
+                              Clone
+                            </button>
+                            <button
+                              onClick={(e) => handleDeletePoll(poll.pollId, e)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                background: 'linear-gradient(135deg, #757575 0%, #616161 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = '0.9'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = '1'
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}

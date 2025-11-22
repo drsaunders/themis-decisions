@@ -30,6 +30,8 @@ themis/
 ```bash
 cd backend
 
+source .venv/bin/activate
+
 # Install dependencies
 pip install -U pip
 pip install .
