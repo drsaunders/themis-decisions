@@ -12,7 +12,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -U pip && pip install .
-    startCommand: python -c "import subprocess; subprocess.run(['alembic', 'stamp', 'head'], check=False); subprocess.run(['alembic', 'upgrade', 'head'], check=True)" && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: (alembic current 2>&1 | grep -q "5d03a847b91d" || alembic stamp 5d03a847b91d) && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
