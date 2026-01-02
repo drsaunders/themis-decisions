@@ -4,6 +4,9 @@ from sqlalchemy import pool
 from alembic import context
 import os
 import sys
+import os
+print("DATABASE_URL:", os.environ.get("DATABASE_URL"))
+print("PGHOST:", os.environ.get("PGHOST"), "DB_HOST:", os.environ.get("DB_HOST"))
 
 # Add the app directory to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
