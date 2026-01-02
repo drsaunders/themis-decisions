@@ -134,9 +134,10 @@ class GlobalConnectionManager:
                 "winner_id": None,
                 "creator_id": creator_id,
                 "princess_mode": princess_mode,
+                "user_ready": None,
             },
         })
-    
+
     async def send_poll_deleted(self, poll_id: str):
         """Broadcast poll deleted event."""
         await self.broadcast({
@@ -155,6 +156,7 @@ class GlobalConnectionManager:
                 "winner_id": None,
                 "creator_id": creator_id,
                 "princess_mode": princess_mode,
+                "user_ready": None,
             },
         })
 

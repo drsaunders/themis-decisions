@@ -5,6 +5,7 @@ import { listPolls, createPoll, deletePoll, clonePoll, Poll, createHomeWebSocket
 
 export default function HomeScreen() {
   const user = useStore((state) => state.user)
+  const clearUser = useStore((state) => state.clearUser)
   const [polls, setPolls] = useState<Poll[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -31,6 +32,8 @@ export default function HomeScreen() {
           // Add new poll at the beginning (most recent first)
           return [message.poll, ...prevPolls]
         })
+        // Reload polls to get accurate user_ready status
+        loadPolls()
       } else if (message.type === 'poll_deleted') {
         // Remove deleted poll from the list
         setPolls((prevPolls) => prevPolls.filter(p => p.pollId !== message.pollId))
@@ -44,6 +47,8 @@ export default function HomeScreen() {
           // Add new poll at the beginning (most recent first)
           return [message.poll, ...prevPolls]
         })
+        // Reload polls to get accurate user_ready status
+        loadPolls()
       }
     }
     ws.onerror = (error) => {
@@ -60,7 +65,7 @@ export default function HomeScreen() {
 
   const loadPolls = async () => {
     try {
-      const data = await listPolls()
+      const data = await listPolls(user?.userId)
       setPolls(data)
     } catch (error) {
       alert('Failed to load polls')
@@ -84,8 +89,14 @@ export default function HomeScreen() {
       setNewPollTitle('')
       setPrincessMode(false)
       navigate(`/poll/${poll.pollId}`)
-    } catch (error) {
-      alert('Failed to create poll')
+    } catch (error: any) {
+      // If user not found, clear user and redirect to name screen
+      if (error.isUserNotFound) {
+        clearUser()
+        window.location.href = '/'
+        return
+      }
+      alert(error.message || 'Failed to create poll')
     } finally {
       setCreating(false)
     }
@@ -110,8 +121,14 @@ export default function HomeScreen() {
     try {
       await clonePoll(pollId, user.userId)
       // Poll will be added via WebSocket update
-    } catch (error) {
-      alert('Failed to clone poll')
+    } catch (error: any) {
+      // If user not found, clear user and redirect to name screen
+      if (error.isUserNotFound) {
+        clearUser()
+        window.location.href = '/'
+        return
+      }
+      alert(error.message || 'Failed to clone poll')
     }
   }
 
@@ -232,11 +249,101 @@ export default function HomeScreen() {
       <div>
         {(() => {
           const activePolls = polls.filter(poll => !poll.winner_id)
+          const submittedPolls = activePolls.filter(poll => poll.user_ready === true)
+          const otherActivePolls = activePolls.filter(poll => poll.user_ready !== true)
           const completedPolls = polls.filter(poll => poll.winner_id)
           
           return (
             <>
-              {activePolls.length > 0 && (
+              {submittedPolls.length > 0 && (
+                <div style={{ marginBottom: '32px' }}>
+                  <h2 style={{ marginBottom: '16px' }}>Submitted</h2>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {submittedPolls.map((poll) => (
+                      <div
+                        key={poll.pollId}
+                        onClick={() => navigate(`/poll/${poll.pollId}`)}
+                        style={{
+                          background: 'white',
+                          padding: '18px',
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 8px rgba(255, 193, 7, 0.15)',
+                          border: '2px solid transparent',
+                          transition: 'all 0.3s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = '#FFD700'
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(255, 193, 7, 0.25)'
+                          e.currentTarget.style.transform = 'translateY(-2px)'
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'transparent'
+                          e.currentTarget.style.boxShadow = '0 2px 8px rgba(255, 193, 7, 0.15)'
+                          e.currentTarget.style.transform = 'translateY(0)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 'bold', marginBottom: '6px', fontSize: '16px', color: '#1A1A1A' }}>{poll.title}</div>
+                            <div style={{ fontSize: '12px', color: '#666' }}>
+                              {new Date(poll.created_at).toLocaleString()}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', marginLeft: '12px' }}>
+                            <button
+                              onClick={(e) => handleClonePoll(poll.pollId, e)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                background: 'linear-gradient(135deg, #757575 0%, #616161 100%)',
+                                opacity: 1,
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = '0.9'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = '1'
+                              }}
+                            >
+                              Clone
+                            </button>
+                            <button
+                              onClick={(e) => handleDeletePoll(poll.pollId, e)}
+                              style={{
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                background: 'linear-gradient(135deg, #757575 0%, #616161 100%)',
+                                opacity: 1,
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = '0.9'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = '1'
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {otherActivePolls.length > 0 && (
                 <div style={{ marginBottom: '32px' }}>
                   <h2 style={{ marginBottom: '16px' }}>Polls</h2>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -324,7 +431,7 @@ export default function HomeScreen() {
                 </div>
               )}
               
-              {activePolls.length === 0 && completedPolls.length === 0 && (
+              {submittedPolls.length === 0 && otherActivePolls.length === 0 && completedPolls.length === 0 && (
                 <div>
                   <h2 style={{ marginBottom: '16px' }}>Polls</h2>
                   <p style={{ color: '#666' }}>No polls yet. Create one to get started!</p>

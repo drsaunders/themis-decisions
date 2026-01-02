@@ -8,6 +8,7 @@ interface User {
 interface Store {
   user: User | null
   setUser: (user: User) => void
+  clearUser: () => void
 }
 
 // Simple localStorage persistence
@@ -33,6 +34,10 @@ export const useStore = create<Store>((set) => ({
   setUser: (user: User) => {
     saveUser(user)
     set({ user })
+  },
+  clearUser: () => {
+    saveUser(null)
+    set({ user: null })
   },
 }))
 

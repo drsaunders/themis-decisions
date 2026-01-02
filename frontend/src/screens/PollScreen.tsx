@@ -8,6 +8,8 @@ import {
   submitVote,
   markReady,
   getStatus,
+  getVotes,
+  getParticipantStatus,
   Option,
   VoteEntry,
   createWebSocket,
@@ -16,6 +18,7 @@ import {
 export default function PollScreen() {
   const { pollId } = useParams<{ pollId: string }>()
   const user = useStore((state) => state.user)
+  const clearUser = useStore((state) => state.clearUser)
   const navigate = useNavigate()
 
   const [options, setOptions] = useState<Option[]>([])
@@ -33,6 +36,7 @@ export default function PollScreen() {
 
   const wsRef = useRef<WebSocket | null>(null)
   const saveTimeoutRef = useRef<number | null>(null)
+  const votesRef = useRef<Record<string, { rating: number | null; veto: boolean }>>({})
 
   useEffect(() => {
     if (!pollId || !user) return
@@ -42,10 +46,12 @@ export default function PollScreen() {
         // Join poll
         await joinPoll(pollId, user.userId)
 
-        // Load options and status
-        const [opts, status] = await Promise.all([
+        // Load options, status, votes, and participant status
+        const [opts, status, votesData, participantStatus] = await Promise.all([
           listOptions(pollId),
           getStatus(pollId),
+          getVotes(pollId, user.userId).catch(() => ({ votes: [] })),
+          getParticipantStatus(pollId, user.userId).catch(() => ({ ready: false })),
         ])
 
         setOptions(opts)
@@ -55,6 +61,20 @@ export default function PollScreen() {
         setTotalParticipants(status.totalParticipants)
         setCreatorId(status.creator_id || null)
         setPrincessMode(status.princess_mode || false)
+        
+        // Restore votes from database
+        const restoredVotes: Record<string, { rating: number | null; veto: boolean }> = {}
+        votesData.votes.forEach((vote: VoteEntry) => {
+          restoredVotes[vote.optionId] = {
+            rating: vote.rating,
+            veto: vote.veto,
+          }
+        })
+        setVotes(restoredVotes)
+        votesRef.current = restoredVotes // Keep ref in sync
+        
+        // Restore ready status from database
+        setReady(participantStatus.ready)
 
         // Connect WebSocket
         const ws = createWebSocket(pollId)
@@ -68,8 +88,14 @@ export default function PollScreen() {
         wsRef.current = ws
 
         setLoading(false)
-      } catch (error) {
-        alert('Failed to load poll')
+      } catch (error: any) {
+        // If user not found, clear user and redirect to name screen
+        if (error.isUserNotFound) {
+          clearUser()
+          window.location.href = '/'
+          return
+        }
+        alert(error.message || 'Failed to load poll')
         navigate('/')
       }
     }
@@ -77,11 +103,15 @@ export default function PollScreen() {
     init()
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+      // Save any pending votes before unmounting
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+        // Save immediately with current votes
+        saveVotes()
+      }
+      if (wsRef.current) {
+        wsRef.current.close()
       }
     }
   }, [pollId, user, navigate])
@@ -119,21 +149,15 @@ export default function PollScreen() {
     }
   }
 
-  const debouncedSaveVotes = () => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-    }
-    saveTimeoutRef.current = window.setTimeout(() => {
-      saveVotes()
-    }, 300)
-  }
-
-  const saveVotes = async () => {
+  const saveVotes = async (votesToSave?: Record<string, { rating: number | null; veto: boolean }>) => {
     if (!pollId || !user || saving) return
+
+    // Use provided votes or current ref value (which is always up-to-date)
+    const currentVotes = votesToSave ?? votesRef.current
 
     setSaving(true)
     try {
-      const entries: VoteEntry[] = Object.entries(votes).map(([optionId, vote]) => ({
+      const entries: VoteEntry[] = Object.entries(currentVotes).map(([optionId, vote]) => ({
         optionId,
         rating: vote.veto ? null : vote.rating,
         veto: vote.veto,
@@ -146,20 +170,47 @@ export default function PollScreen() {
     }
   }
 
+  const debouncedSaveVotes = () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    saveTimeoutRef.current = window.setTimeout(() => {
+      saveVotes()
+    }, 300)
+  }
+
+  const saveVotesImmediately = () => {
+    // Cancel any pending debounced save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+    // Save immediately with current votes
+    saveVotes()
+  }
+
   const handleRatingChange = (optionId: string, rating: number) => {
-    setVotes((prev) => ({
-      ...prev,
-      [optionId]: { ...prev[optionId], rating, veto: false },
-    }))
+    setVotes((prev) => {
+      const updated = {
+        ...prev,
+        [optionId]: { ...prev[optionId], rating, veto: false },
+      }
+      votesRef.current = updated // Keep ref in sync with latest state
+      return updated
+    })
     setReady(false) // Reset ready status when rating changes
     debouncedSaveVotes()
   }
 
   const handleVetoChange = (optionId: string, veto: boolean) => {
-    setVotes((prev) => ({
-      ...prev,
-      [optionId]: { ...prev[optionId], veto, rating: veto ? null : prev[optionId]?.rating ?? 5 },
-    }))
+    setVotes((prev) => {
+      const updated = {
+        ...prev,
+        [optionId]: { ...prev[optionId], veto, rating: veto ? null : prev[optionId]?.rating ?? 5 },
+      }
+      votesRef.current = updated // Keep ref in sync with latest state
+      return updated
+    })
     setReady(false) // Reset ready status when veto changes
     debouncedSaveVotes()
   }
@@ -353,7 +404,11 @@ export default function PollScreen() {
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: '16px' }}>
         <button 
-          onClick={() => navigate('/')} 
+          onClick={() => {
+            // Save any pending votes before navigating
+            saveVotesImmediately()
+            navigate('/')
+          }} 
           style={{ 
             background: 'linear-gradient(135deg, #9E9E9E 0%, #757575 100%)',
             color: 'white',

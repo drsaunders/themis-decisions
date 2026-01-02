@@ -1,11 +1,21 @@
 """FastAPI application entry point."""
 import os
 import json
+from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
+
+
+def format_iso_datetime(dt: datetime) -> str:
+    """Format datetime as ISO string with UTC timezone indicator."""
+    iso_str = dt.isoformat()
+    # If datetime is naive (no timezone info), append 'Z' to indicate UTC
+    if dt.tzinfo is None:
+        return iso_str + 'Z'
+    return iso_str
 
 from app.database import get_db, engine, Base
 from app.models import User, Poll, Participant, Option, Vote
@@ -14,10 +24,12 @@ from app.schemas import (
     PollCreate, PollResponse,
     JoinPollRequest, JoinPollResponse,
     OptionCreate, OptionResponse,
-    VoteRequest, VoteResponse,
+    VoteRequest, VoteResponse, VoteEntry,
     ReadyRequest, ReadyResponse,
     StatusResponse, RevealResponse,
     ClonePollRequest,
+    VotesResponse,
+    ParticipantStatusResponse,
 )
 from app.scoring import compute_winner
 from app.websocket import manager, global_manager
@@ -52,20 +64,33 @@ async def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/polls", response_model=list[PollResponse])
-async def list_polls(db: Session = Depends(get_db)):
-    """List all polls."""
+async def list_polls(userId: Optional[str] = None, db: Session = Depends(get_db)):
+    """List all polls. Optionally include user's ready status if userId is provided."""
     polls = db.query(Poll).order_by(Poll.created_at.desc()).all()
-    return [
-        PollResponse(
+    
+    result = []
+    for poll in polls:
+        user_ready = None
+        if userId:
+            # Check if user is ready for this poll
+            participant = db.query(Participant).filter(
+                Participant.poll_id == poll.id,
+                Participant.user_id == userId
+            ).first()
+            if participant:
+                user_ready = participant.ready
+        
+        result.append(PollResponse(
             pollId=poll.id,
             title=poll.title,
-            created_at=poll.created_at.isoformat(),
+            created_at=format_iso_datetime(poll.created_at),
             winner_id=poll.winner_id,
             creator_id=poll.creator_id,
-            princess_mode=poll.princess_mode
-        )
-        for poll in polls
-    ]
+            princess_mode=poll.princess_mode,
+            user_ready=user_ready
+        ))
+    
+    return result
 
 
 @app.post("/polls", response_model=PollResponse)
@@ -76,7 +101,7 @@ async def create_poll(poll_data: PollCreate, db: Session = Depends(get_db)):
     if creator_id:
         user = db.query(User).filter(User.id == creator_id).first()
         if not user:
-            raise HTTPException(status_code=404, detail="Creator user not found")
+            raise HTTPException(status_code=400, detail="Creator user not found. Please create a new user.")
     
     poll = Poll(
         title=poll_data.title,
@@ -91,7 +116,7 @@ async def create_poll(poll_data: PollCreate, db: Session = Depends(get_db)):
     await global_manager.send_poll_created(
         poll_id=poll.id,
         title=poll.title,
-        created_at=poll.created_at.isoformat(),
+        created_at=format_iso_datetime(poll.created_at),
         creator_id=poll.creator_id,
         princess_mode=poll.princess_mode
     )
@@ -99,10 +124,11 @@ async def create_poll(poll_data: PollCreate, db: Session = Depends(get_db)):
     return PollResponse(
         pollId=poll.id,
         title=poll.title,
-        created_at=poll.created_at.isoformat(),
+        created_at=format_iso_datetime(poll.created_at),
         winner_id=poll.winner_id,
         creator_id=poll.creator_id,
-        princess_mode=poll.princess_mode
+        princess_mode=poll.princess_mode,
+        user_ready=None
     )
 
 
@@ -117,7 +143,7 @@ async def join_poll(poll_id: str, request: JoinPollRequest, db: Session = Depend
     # Check if user exists
     user = db.query(User).filter(User.id == request.userId).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=400, detail="User not found. Please create a new user.")
     
     # Check if already a participant
     existing = db.query(Participant).filter(
@@ -212,6 +238,9 @@ async def submit_vote(poll_id: str, vote_data: VoteRequest, db: Session = Depend
         if entry.rating is not None and (entry.rating < 0 or entry.rating > 10):
             raise HTTPException(status_code=400, detail="Rating must be between 0 and 10")
     
+    # Track if any votes actually changed
+    votes_changed = False
+    
     # Process each vote entry
     for entry in vote_data.entries:
         # Check if option exists
@@ -230,10 +259,16 @@ async def submit_vote(poll_id: str, vote_data: VoteRequest, db: Session = Depend
         ).first()
         
         if vote:
+            # Check if vote actually changed
+            new_rating = entry.rating if not entry.veto else None
+            if vote.rating != new_rating or vote.veto != entry.veto:
+                votes_changed = True
             # Update existing vote
-            vote.rating = entry.rating if not entry.veto else None
+            vote.rating = new_rating
             vote.veto = entry.veto
         else:
+            # New vote is always a change
+            votes_changed = True
             # Create new vote
             vote = Vote(
                 poll_id=poll_id,
@@ -244,8 +279,9 @@ async def submit_vote(poll_id: str, vote_data: VoteRequest, db: Session = Depend
             )
             db.add(vote)
     
-    # Reset only this participant's ready status when votes change
-    participant.ready = False
+    # Reset only this participant's ready status when votes actually change
+    if votes_changed:
+        participant.ready = False
     
     db.commit()
     
@@ -343,6 +379,52 @@ async def get_status(poll_id: str, db: Session = Depends(get_db)):
     )
 
 
+@app.get("/polls/{poll_id}/votes", response_model=VotesResponse)
+async def get_votes(poll_id: str, userId: str, db: Session = Depends(get_db)):
+    """Get votes for a specific user in a poll."""
+    # Check if poll exists
+    poll = db.query(Poll).filter(Poll.id == poll_id).first()
+    if not poll:
+        raise HTTPException(status_code=404, detail="Poll not found")
+    
+    # Get all votes for this user in this poll
+    votes = db.query(Vote).filter(
+        Vote.poll_id == poll_id,
+        Vote.user_id == userId
+    ).all()
+    
+    vote_entries = [
+        VoteEntry(
+            optionId=vote.option_id,
+            rating=vote.rating,
+            veto=vote.veto
+        )
+        for vote in votes
+    ]
+    
+    return VotesResponse(votes=vote_entries)
+
+
+@app.get("/polls/{poll_id}/participant-status", response_model=ParticipantStatusResponse)
+async def get_participant_status(poll_id: str, userId: str, db: Session = Depends(get_db)):
+    """Get participant status (ready) for a specific user in a poll."""
+    # Check if poll exists
+    poll = db.query(Poll).filter(Poll.id == poll_id).first()
+    if not poll:
+        raise HTTPException(status_code=404, detail="Poll not found")
+    
+    # Get participant
+    participant = db.query(Participant).filter(
+        Participant.poll_id == poll_id,
+        Participant.user_id == userId
+    ).first()
+    
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    
+    return ParticipantStatusResponse(ready=participant.ready)
+
+
 @app.post("/polls/{poll_id}/reveal", response_model=RevealResponse)
 async def reveal_winner(poll_id: str, db: Session = Depends(get_db)):
     """Reveal the winner (only if all participants are ready)."""
@@ -413,7 +495,7 @@ async def clone_poll(poll_id: str, request: ClonePollRequest, db: Session = Depe
     if creator_id:
         user = db.query(User).filter(User.id == creator_id).first()
         if not user:
-            raise HTTPException(status_code=404, detail="Creator user not found")
+            raise HTTPException(status_code=400, detail="Creator user not found. Please create a new user.")
     
     # Create new poll
     new_poll = Poll(
@@ -440,7 +522,7 @@ async def clone_poll(poll_id: str, request: ClonePollRequest, db: Session = Depe
     await global_manager.send_poll_cloned(
         poll_id=new_poll.id,
         title=new_poll.title,
-        created_at=new_poll.created_at.isoformat(),
+        created_at=format_iso_datetime(new_poll.created_at),
         creator_id=new_poll.creator_id,
         princess_mode=new_poll.princess_mode
     )
@@ -448,7 +530,7 @@ async def clone_poll(poll_id: str, request: ClonePollRequest, db: Session = Depe
     return PollResponse(
         pollId=new_poll.id,
         title=new_poll.title,
-        created_at=new_poll.created_at.isoformat(),
+        created_at=format_iso_datetime(new_poll.created_at),
         winner_id=new_poll.winner_id,
         creator_id=new_poll.creator_id,
         princess_mode=new_poll.princess_mode

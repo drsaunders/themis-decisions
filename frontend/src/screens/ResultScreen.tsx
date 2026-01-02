@@ -5,6 +5,7 @@ import { getStatus, Option } from '../api'
 export default function ResultScreen() {
   const { pollId } = useParams<{ pollId: string }>()
   const [winner, setWinner] = useState<Option | null>(null)
+  const [pollTitle, setPollTitle] = useState('')
   const [loading, setLoading] = useState(true)
   const [showEffects, setShowEffects] = useState(false)
   const navigate = useNavigate()
@@ -16,6 +17,7 @@ export default function ResultScreen() {
     const loadResult = async () => {
       try {
         const status = await getStatus(pollId)
+        setPollTitle(status.title)
         if (status.winner) {
           setWinner(status.winner)
           // Trigger celebration effects after a short delay
@@ -121,6 +123,14 @@ export default function ResultScreen() {
         zIndex: 2,
         animation: showEffects && winner ? 'pulse 2s ease-in-out infinite' : 'none',
       }}>
+        {pollTitle && (
+          <h2 style={{ 
+            marginBottom: '16px',
+            fontSize: '24px',
+            fontWeight: '600',
+            color: '#1A1A1A',
+          }}>{pollTitle}</h2>
+        )}
         <h1 style={{ 
           marginBottom: '32px',
           fontSize: '36px',

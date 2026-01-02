@@ -13,6 +13,7 @@ export interface Poll {
   winner_id?: string | null
   creator_id?: string | null
   princess_mode?: boolean
+  user_ready?: boolean | null
 }
 
 export interface Option {
@@ -36,8 +37,9 @@ export async function createUser(name: string): Promise<User> {
   return response.json()
 }
 
-export async function listPolls(): Promise<Poll[]> {
-  const response = await fetch(`${API_URL}/polls`)
+export async function listPolls(userId?: string): Promise<Poll[]> {
+  const url = userId ? `${API_URL}/polls?userId=${userId}` : `${API_URL}/polls`
+  const response = await fetch(url)
   if (!response.ok) throw new Error('Failed to fetch polls')
   return response.json()
 }
@@ -48,7 +50,13 @@ export async function createPoll(title: string, creatorId: string, princessMode:
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, creator_id: creatorId, princess_mode: princessMode }),
   })
-  if (!response.ok) throw new Error('Failed to create poll')
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: 'Failed to create poll' }))
+    const error = new Error(errorData.detail || 'Failed to create poll')
+    ;(error as any).status = response.status
+    ;(error as any).isUserNotFound = response.status === 400 && errorData.detail?.includes('user not found')
+    throw error
+  }
   return response.json()
 }
 
@@ -58,7 +66,13 @@ export async function joinPoll(pollId: string, userId: string): Promise<{ partic
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId }),
   })
-  if (!response.ok) throw new Error('Failed to join poll')
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: 'Failed to join poll' }))
+    const error = new Error(errorData.detail || 'Failed to join poll')
+    ;(error as any).status = response.status
+    ;(error as any).isUserNotFound = response.status === 400 && errorData.detail?.includes('user not found')
+    throw error
+  }
   return response.json()
 }
 
@@ -111,6 +125,18 @@ export async function getStatus(pollId: string): Promise<{
   return response.json()
 }
 
+export async function getVotes(pollId: string, userId: string): Promise<{ votes: VoteEntry[] }> {
+  const response = await fetch(`${API_URL}/polls/${pollId}/votes?userId=${userId}`)
+  if (!response.ok) throw new Error('Failed to get votes')
+  return response.json()
+}
+
+export async function getParticipantStatus(pollId: string, userId: string): Promise<{ ready: boolean }> {
+  const response = await fetch(`${API_URL}/polls/${pollId}/participant-status?userId=${userId}`)
+  if (!response.ok) throw new Error('Failed to get participant status')
+  return response.json()
+}
+
 export async function revealWinner(pollId: string): Promise<{ winner: Option }> {
   const response = await fetch(`${API_URL}/polls/${pollId}/reveal`, {
     method: 'POST',
@@ -132,7 +158,13 @@ export async function clonePoll(pollId: string, creatorId: string): Promise<Poll
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ creator_id: creatorId }),
   })
-  if (!response.ok) throw new Error('Failed to clone poll')
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: 'Failed to clone poll' }))
+    const error = new Error(errorData.detail || 'Failed to clone poll')
+    ;(error as any).status = response.status
+    ;(error as any).isUserNotFound = response.status === 400 && errorData.detail?.includes('user not found')
+    throw error
+  }
   return response.json()
 }
 

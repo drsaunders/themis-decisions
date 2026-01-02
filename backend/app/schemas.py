@@ -28,6 +28,7 @@ class PollResponse(BaseModel):
     winner_id: Optional[str] = None
     creator_id: Optional[str] = None
     princess_mode: bool = False
+    user_ready: Optional[bool] = None  # Whether the requesting user is ready (None if user not provided)
 
     class Config:
         from_attributes = True
@@ -89,6 +90,14 @@ class StatusResponse(BaseModel):
 
 class RevealResponse(BaseModel):
     winner: OptionResponse
+
+
+class VotesResponse(BaseModel):
+    votes: List[VoteEntry]
+
+
+class ParticipantStatusResponse(BaseModel):
+    ready: bool
 
 
 class ClonePollRequest(BaseModel):
