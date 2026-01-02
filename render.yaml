@@ -1,5 +1,11 @@
+databases:
+  - name: themis-db
+    plan: free
+    databaseName: themis
+    user: themis
+    region: oregon
+
 services:
-  # Backend API
   - type: web
     name: themis-backend
     runtime: python
@@ -19,7 +25,6 @@ services:
         value: "1"
     healthCheckPath: /healthz
 
-  # Frontend Static Site
   - type: web
     name: themis-frontend
     runtime: static
@@ -32,10 +37,3 @@ services:
         sync: false
       - key: VITE_WS_URL
         sync: false
-
-databases:
-  - name: themis-db
-    region: oregon
-    plan: free
-    databaseName: themis
-    user: themis
