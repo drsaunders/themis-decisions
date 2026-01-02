@@ -1,17 +1,10 @@
 services:
-  # PostgreSQL Database
-  - type: pserv
-    name: themis-db
-    env: postgres
-    plan: free
-    databaseName: themis
-    user: themis
-
   # Backend API
   - type: web
     name: themis-backend
-    env: python
+    runtime: python
     plan: free
+    region: oregon
     rootDir: backend
     buildCommand: pip install -U pip && pip install .
     startCommand: set -e && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -23,14 +16,15 @@ services:
       - key: ALLOWED_ORIGINS
         sync: false
       - key: PYTHONUNBUFFERED
-        value: 1
+        value: "1"
     healthCheckPath: /healthz
 
   # Frontend Static Site
   - type: web
     name: themis-frontend
-    env: static
+    runtime: static
     plan: free
+    region: oregon
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
     envVars:
@@ -38,3 +32,10 @@ services:
         sync: false
       - key: VITE_WS_URL
         sync: false
+
+databases:
+  - name: themis-db
+    region: oregon
+    plan: free
+    databaseName: themis
+    user: themis
