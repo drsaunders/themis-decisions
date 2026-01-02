@@ -2,11 +2,13 @@ databases:
   - name: themis-db
     databaseName: themis
     user: themis
+    plan: free
 
 services:
   - type: web
     name: themis-backend
     runtime: python
+    plan: free
     rootDir: backend
     buildCommand: pip install -U pip && pip install .
     startCommand: set -e && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -24,6 +26,7 @@ services:
   - type: web
     name: themis-frontend
     runtime: static
+    plan: free
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
     envVars:
